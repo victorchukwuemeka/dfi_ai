@@ -95,45 +95,7 @@ By the end of this module, learners will be able to:
 
 ---
 
-## Slides / Teaching Notes
-- **Slide 1: "What is an LLM?" (definition + use cases)**  
-  Definition: A neural network trained on massive text data to predict the next token in a sequence.  
-  Use cases: Text generation, translation, summarization, code completion, chatbots.
-
-- **Slide 2: "Tokenization" (example of subword split)**  
-  Example: "unhappiness" → ["un", "happi", "ness"]  
-  Impact: Affects prompt effectiveness and cost (shorter prompts = fewer tokens).
-
-- **Slide 3: "Embeddings" (text → vectors)**  
-  Visual: Show vector space with words clustered by meaning.  
-  Key point: Enables semantic similarity calculations.
-
-- **Slide 4: "Attention" (visual of weighted context)**  
-  Diagram: Input sequence with attention weights showing which tokens influence the current prediction.  
-  Analogy: Like focusing on relevant parts of a conversation.
-
-- **Slide 5: "Transformer Block" (attention + MLP + residuals)**  
-  Architecture diagram: Multi-head attention → Feed-forward → Residual connections.  
-  Note: Multiple blocks stacked for deep processing.
-
-- **Slide 6: "Context Window" (limits and tradeoffs)**  
-  Chart: Context length vs. model performance and cost.  
-  Tradeoff: Longer context = better coherence but higher latency/cost.
-
-- **Slide 7: "Inference Pipeline" (prompt → logits → output)**  
-  Flowchart: Raw text → Tokenization → Model forward pass → Logits → Decoding → Final text.
-
-- **Slide 8: "Decoding Settings" (temp, top‑k, top‑p)**  
-  Examples: Temperature scales (0.1 = deterministic, 1.0 = creative).  
-  Top-k: Sample from top k tokens. Top-p: Sample from nucleus of high-probability tokens.
-
-- **Slide 9: "Practical Tradeoffs" (quality vs speed vs cost)**  
-  Matrix: High quality (beam search) vs. Fast (greedy) vs. Cheap (shorter context).
-
-- **Slide 10: "Definitions Recap" (LLM, embedding, inference, tokenization)**  
-  Quick reference with key terms and one-sentence explanations.
-
----
+> Instructor guide moved to `month_1/01_llm_architecture_inference_instructor.md`.
 
 ## Lab: Inference Behavior Playground
 
