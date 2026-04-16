@@ -123,6 +123,17 @@ Output:  "the" -> "cat" -> "sat" -> "the" -> "cat" -> "sat"  (stuck in loop)
 ```
 At every step, one winner is picked and the rest are thrown away. Fast and deterministic, but shortsighted — it never considers whether a slightly worse first token leads to a better overall sentence. Common failure: repetitive loops.
 
+Greedy decoding works by repeating the same simple rule for every new token:
+- The model reads the current context
+- It scores all possible next tokens
+- It picks the single highest-scoring token
+- That token is appended to the text
+- The model repeats the process from the updated context
+
+In the example above, the model may first choose `"the"` because it has the highest score. After adding `"the"` to the sequence, it scores the next-token options again. If `"cat"` is now highest, it picks `"cat"`. Then it may pick `"sat"` for the same reason. If this pattern keeps receiving the top score, the model can get trapped in a repetitive loop like `"the -> cat -> sat"` over and over.
+
+It is called **greedy** because it always takes the best immediate option right now without looking ahead. A token that is slightly less likely at the current step might lead to a much better full sentence later, but greedy decoding never explores that possibility. This makes it fast and predictable, but often less flexible and less natural than other decoding methods.
+
 ---
 
 **2. Beam search**  (beam size = 3)
