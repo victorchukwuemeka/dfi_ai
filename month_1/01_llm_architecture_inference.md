@@ -106,14 +106,123 @@ By the end of this module, learners will be able to:
    - The sequence becomes `"The capital of France is Paris"` and generation continues from there
 
 
-8. **Decoding strategies: greedy, beam, sampling, top-k, top-p**  
-   - **Greedy decoding**: Always picks the highest-probability token (deterministic but can be repetitive)  
-   - **Beam search**: Keeps track of multiple candidate sequences, choosing the most probable overall path  
-   - **Sampling**: Randomly selects from the probability distribution  
-   - **Top-k**: Limits sampling to the k most likely tokens  
-   - **Top-p (nucleus)**: Samples from the smallest set of tokens whose cumulative probability exceeds p
+8. **Decoding strategies: greedy, beam, sampling, top-k, top-p**
 
-9. **Temperature and output variability**  
+---
+
+**1. Greedy decoding**
+
+```
+Logits:  [the: 0.6,  cat: 0.3,  dog: 0.08,  bird: 0.02]
+                |
+                v
+Always pick highest
+                |
+                v
+Output:  "the" -> "cat" -> "sat" -> "the" -> "cat" -> "sat"  (stuck in loop)
+```
+At every step, one winner is picked and the rest are thrown away. Fast and deterministic, but shortsighted — it never considers whether a slightly worse first token leads to a better overall sentence. Common failure: repetitive loops.
+
+---
+
+**2. Beam search**  (beam size = 3)
+
+```
+Step 1:                    Step 2:                     Step 3:
+keep top 3 sequences       expand each, keep top 3     expand again, keep top 3
+                                                                    |
+"the"      (0.60)  ->   "the cat"    (0.60*0.55)  ->  "the cat sat"   (0.29)  <-- best
+"a"        (0.25)  ->   "the dog"    (0.60*0.20)  ->  "the cat ran"   (0.18)
+"one"      (0.10)  ->   "a cat"      (0.25*0.50)  ->  "a cat sat"     (0.11)
+```
+Instead of committing to one token at a time, beam search tracks B candidate sequences in parallel. At each step it scores every possible extension of every beam, keeps only the top B by total probability, and drops the rest. The best complete sequence wins at the end — not just the one with the best first token. This is why it outperforms greedy on tasks like translation, where the right word early on unlocks a much better sentence overall.
+
+---
+
+**3. Sampling (random)**
+
+```
+Logits:  [the: 0.60,  a: 0.25,  one: 0.10,  some: 0.05]
+                |
+                v
+Spin the wheel  (probabilities are the slice sizes)
+                |
+         --------------------
+         |        |         |
+       "the"     "a"      "one"    <-- any can be picked
+      (60%)     (25%)     (10%)
+```
+Rather than always picking the top token, the model randomly draws from the full probability distribution. A token with 60% probability gets chosen 60% of the time — so high-probability tokens still win most often, but lower ones get a chance too. This introduces variety and creativity, which is great for open-ended generation like storytelling. The risk is that without any constraint, very unlikely tokens can still be picked, producing incoherent output.
+
+---
+
+**4. Top-k sampling**  (k = 3)
+
+```
+Logits:  [the: 0.60,  a: 0.25,  one: 0.10,  some: 0.05,  every: 0.00...]
+                |
+                v
+Cut off everything below rank 3
+                |
+                v
+Pool:    [the: 0.60,  a: 0.25,  one: 0.10]   "some" and below -> gone
+                |
+                v
+Sample randomly from pool only
+```
+Top-k fixes the problem of pure sampling by setting a hard ceiling on how many candidates can be considered. Only the k most probable tokens survive — everything else is zeroed out — and the model samples from that smaller pool. This prevents wild low-probability picks while still allowing variety. The weakness is that k is fixed regardless of context: when the model is very confident, a pool of 50 still forces it to consider 49 bad options; when the model is uncertain, a pool of 50 might cut off many reasonable choices.
+
+---
+
+**5. Top-p / nucleus sampling**  (p = 0.90)
+
+```
+Logits sorted:  the: 0.60 -> cumulative: 0.60  (keep)
+                a:   0.25 -> cumulative: 0.85  (keep)
+                one: 0.10 -> cumulative: 0.95  (crossed 0.90 -> stop here)
+                some:0.05 -> ignored
+                ...  -> ignored
+                |
+                v
+Pool size adapts to the model's confidence:
+
+  Confident model:            Uncertain model:
+  the: 0.91 -> pool = 1       the: 0.20 -> keep
+  a:   0.05 -> ignored        a:   0.18 -> keep
+  ...                         one: 0.16 -> keep
+                              some:0.14 -> keep
+                              ... -> pool grows until sum >= 0.90
+```
+Instead of a fixed count, top-p builds the pool dynamically by adding tokens in order of probability until their cumulative sum reaches p. This means the pool automatically shrinks when the model is confident (one dominant token covers most of the probability mass) and expands when the model is uncertain (probability is spread across many reasonable options). This adaptability is why top-p tends to produce more natural, coherent text than top-k — it respects the shape of the distribution rather than ignoring it.
+
+---
+
+**How they are often combined in practice**
+
+```
+Raw logits
+    |
+    v
+Apply temperature  (scale confidence up or down)
+    |
+    v
+Apply top-k  (hard ceiling on number of candidates)
+    |
+    v
+Apply top-p  (trim further by cumulative probability)
+    |
+    v
+Sample from final pool
+    |
+    v
+Output token
+```
+Temperature is applied first to the raw logits — a low value (e.g. 0.3) sharpens the distribution making the model more decisive, a high value (e.g. 1.5) flattens it making the model more adventurous. Top-k then sets a hard upper bound on candidates. Top-p trims that pool further based on cumulative probability. Finally the model samples from whatever remains. Using all three together gives fine-grained control: temperature shapes the personality, top-k sets the ceiling, top-p handles the rest adaptively.
+
+
+
+
+1. **Temperature and output variability**  
    Temperature scales the logits before applying softmax. Lower temperatures (0.1-0.3) make the distribution more peaked, favoring high-probability tokens for more deterministic outputs. Higher temperatures (0.7-1.0+) flatten the distribution, increasing randomness and creativity but potentially reducing coherence.
 
 ### 2a. Real‑World Mental Model (10 minutes)
