@@ -57,7 +57,54 @@ By the end of this module, learners will be able to:
    The context window (typically 2048-8192 tokens) limits how much text the model can consider at once. This affects long conversations or documents - information beyond the window gets forgotten. Larger context windows improve coherence but increase computational cost and latency.
 
 7. **Inference pipeline: prompt → tokens → logits → decoded output**  
-   The inference process starts with tokenizing the input prompt, then passes it through the transformer layers to compute logits (raw prediction scores for each possible next token), and finally uses a decoding strategy to select the actual output tokens.
+   The inference process is the step-by-step path from raw user text to the model's final answer. First, the input prompt is split into tokens so the model can process it numerically. Those tokens are converted into embeddings, combined with positional information, and passed through many transformer layers where attention and feed-forward networks build richer contextual representations. At the end of the forward pass, the model produces **logits**, which are raw scores for every possible next token in the vocabulary. A decoding strategy then turns those scores into an actual token choice. That chosen token is appended to the sequence, and the process repeats one token at a time until the model reaches a stop condition such as an end-of-sequence token, a max token limit, or a stop string.
+
+   
+   ```text
+   +---------+    +-------------+    +------------------+    +------------+    +--------+
+   |  Prompt | -> | Tokenization| -> | Embeddings + Pos | -> | Transformer| -> | Logits |
+   | (text)  |    | (text→tokens)|    | Encoding        |    | Layers     |    |(scores)|
+   +---------+    +-------------+    +------------------+    +------------+    +--------+
+                                                           |
+                                                           v
+                                                +------------------------+
+                                                |     Decoding           |
+                                                | (greedy / top-k / top-p|
+                                                |   / temperature)       |
+                                                +------------------------+
+                                                           |
+                                                           v
+                                                +------------------------+
+                                                |     Final Output       |
+                                                |  (decoded text answer) |
+                                                +------------------------+
+   ```
+
+   **Step-by-step view of inference**
+   - **1. Prompt ingestion**: The system receives raw text such as "Explain photosynthesis simply."
+   - **2. Tokenization**: The text is broken into tokens, which may be whole words, subwords, punctuation marks, or special tokens.
+   - **3. Embedding lookup**: Each token ID is mapped to a dense vector so the model can operate on numbers instead of text symbols.
+   - **4. Positional encoding / position information**: The model adds information about token order so it can distinguish between sequences like "dog bites man" and "man bites dog."
+   - **5. Transformer forward pass**: The token representations move through stacked layers of self-attention and feed-forward networks, allowing each token to incorporate context from earlier tokens.
+   - **6. Next-token logits**: For the current position, the model outputs a score for every token in its vocabulary. These scores are called logits and are not probabilities yet.
+   - **7. Probability conversion**: A softmax function converts logits into probabilities, producing a distribution over possible next tokens.
+   - **8. Decoding decision**: The system selects the next token using a rule such as greedy decoding, top-k sampling, top-p sampling, or temperature-scaled sampling.
+   - **9. Append and repeat**: The chosen token is added to the sequence, then the model runs again to predict the next one.
+   - **10. Detokenization**: Once generation stops, the final token sequence is converted back into human-readable text.
+
+   **Important intuition**
+   - The model usually generates output **one token at a time**, not all at once.
+   - The logits are just raw scores; decoding is the step that turns those scores into actual text.
+   - Small decoding changes can produce very different answers even when the model and prompt stay the same.
+   - Longer outputs require more repeated inference steps, which increases latency and cost.
+
+   **Mini example**
+   - Prompt: `"The capital of France is"`
+   - Likely high-logit candidates for the next token: `" Paris"`, `" Lyon"`, `" Marseille"`
+   - After softmax, `" Paris"` may receive the highest probability
+   - With greedy decoding, the model picks `" Paris"`
+   - The sequence becomes `"The capital of France is Paris"` and generation continues from there
+
 
 8. **Decoding strategies: greedy, beam, sampling, top-k, top-p**  
    - **Greedy decoding**: Always picks the highest-probability token (deterministic but can be repetitive)  
