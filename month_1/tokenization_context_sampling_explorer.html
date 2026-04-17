@@ -1,0 +1,467 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); }
+.nav { display: flex; gap: 8px; padding: 1.5rem 0 1rem; border-bottom: 0.5px solid var(--color-border-tertiary); margin-bottom: 1.5rem; }
+.nav button { padding: 8px 16px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); background: transparent; color: var(--color-text-secondary); font-size: 13px; cursor: pointer; transition: all .15s; }
+.nav button.active { background: var(--color-background-secondary); color: var(--color-text-primary); border-color: var(--color-border-primary); font-weight: 500; }
+.section { display: none; } .section.active { display: block; }
+.card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1.25rem; margin-bottom: 1rem; }
+.label { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
+.code { font-family: var(--font-mono); font-size: 12px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px; white-space: pre-wrap; word-break: break-all; line-height: 1.7; border: 0.5px solid var(--color-border-tertiary); }
+.token-grid { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0; }
+.tok { padding: 3px 8px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; font-weight: 500; border: 0.5px solid; }
+.stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+.stat { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px; text-align: center; }
+.stat .num { font-size: 22px; font-weight: 500; color: var(--color-text-primary); }
+.stat .lbl { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
+textarea { width: 100%; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); padding: 10px; font-size: 13px; font-family: var(--font-sans); resize: vertical; background: var(--color-background-primary); color: var(--color-text-primary); outline: none; }
+textarea:focus { border-color: var(--color-border-primary); }
+.slider-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.slider-row label { font-size: 13px; color: var(--color-text-secondary); min-width: 100px; }
+.slider-row input[type=range] { flex: 1; }
+.slider-row .val { font-size: 13px; font-weight: 500; min-width: 36px; text-align: right; }
+.output-tokens { display: flex; flex-wrap: wrap; gap: 4px; min-height: 40px; align-items: flex-start; padding: 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); }
+.otok { padding: 4px 10px; border-radius: 4px; font-size: 13px; }
+.prob-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.prob-bar .word { font-family: var(--font-mono); font-size: 12px; min-width: 80px; }
+.prob-bar .bar-bg { flex: 1; height: 18px; background: var(--color-background-secondary); border-radius: 3px; overflow: hidden; }
+.prob-bar .bar-fill { height: 100%; border-radius: 3px; transition: width .3s; }
+.prob-bar .pct { font-size: 12px; color: var(--color-text-secondary); min-width: 36px; text-align: right; }
+.ctx-bar { height: 28px; border-radius: 4px; background: var(--color-background-secondary); margin: 8px 0; overflow: hidden; display: flex; }
+.ctx-used { background: #4A8B5C; display: flex; align-items: center; justify-content: center; font-size: 11px; color: white; transition: width .3s; }
+.ctx-free { display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--color-text-tertiary); flex: 1; }
+.insight { background: var(--color-background-info); border: 0.5px solid var(--color-border-info); border-radius: var(--border-radius-md); padding: 10px 14px; font-size: 13px; color: var(--color-text-info); margin: 10px 0; line-height: 1.6; }
+.tab-content h3 { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+.tab-content p { font-size: 13px; color: var(--color-text-secondary); line-height: 1.6; margin-bottom: 12px; }
+select { border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); padding: 6px 10px; font-size: 13px; background: var(--color-background-primary); color: var(--color-text-primary); }
+.gen-output { font-family: var(--font-mono); font-size: 13px; line-height: 1.8; min-height: 60px; }
+.chosen { color: #3B8BD4; font-weight: 500; }
+.rejected { color: var(--color-text-tertiary); text-decoration: line-through; }
+</style>
+
+<div class="nav">
+  <button class="active" onclick="show('tok')">1 — Tokenization</button>
+  <button onclick="show('ctx')">2 — Context windows</button>
+  <button onclick="show('samp')">3 — Sampling mechanics</button>
+</div>
+
+<!-- SECTION 1: TOKENIZATION -->
+<div id="tok" class="section active tab-content">
+  <h3>Tokenization — text is not what the model sees</h3>
+  <p>LLMs never see characters. They see <em>tokens</em> — chunks from a vocabulary (GPT-4 has ~100k). Spaces, punctuation, and word-frequency all affect how text is split. Type below and watch it tokenize live.</p>
+
+  <div class="card">
+    <div class="label">Input text</div>
+    <textarea id="tok-input" rows="3" oninput="tokenize()">Hello world! Tokenization is fascinating.</textarea>
+    <div class="stats-row" id="tok-stats"></div>
+    <div class="label" style="margin-top:8px">Tokens (each color = one token)</div>
+    <div class="token-grid" id="tok-display"></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Why this matters — real examples</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button onclick="setExample('Hello world!')" style="font-size:12px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:4px;background:transparent;cursor:pointer;color:var(--color-text-secondary)">"Hello world!"</button>
+      <button onclick="setExample('ChatGPT vs Claude')" style="font-size:12px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:4px;background:transparent;cursor:pointer;color:var(--color-text-secondary)">"ChatGPT vs Claude"</button>
+      <button onclick="setExample('1234567890')" style="font-size:12px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:4px;background:transparent;cursor:pointer;color:var(--color-text-secondary)">"1234567890"</button>
+      <button onclick="setExample('python def function():')" style="font-size:12px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:4px;background:transparent;cursor:pointer;color:var(--color-text-secondary)">"python code"</button>
+      <button onclick="setExample('Nairobi, Lagos, Accra')" style="font-size:12px;padding:4px 10px;border:0.5px solid var(--color-border-secondary);border-radius:4px;background:transparent;cursor:pointer;color:var(--color-text-secondary)">"African cities"</button>
+    </div>
+    <div class="code" id="tok-code"></div>
+  </div>
+
+  <div class="insight" id="tok-insight"></div>
+</div>
+
+<!-- SECTION 2: CONTEXT WINDOWS -->
+<div id="ctx" class="section tab-content">
+  <h3>Context window trade-offs — memory is tokens, not words</h3>
+  <p>The context window is the model's entire working memory. It holds your prompt + conversation history + the response being generated. Understanding token cost lets you engineer prompts efficiently.</p>
+
+  <div class="card">
+    <div class="label">Model context limits</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <select id="model-select" onchange="updateCtx()">
+        <option value="4096">GPT-3.5 — 4,096 tokens</option>
+        <option value="16385">GPT-3.5-turbo-16k — 16,385 tokens</option>
+        <option value="128000" selected>GPT-4o — 128,000 tokens</option>
+        <option value="200000">Claude 3.5 Sonnet — 200,000 tokens</option>
+        <option value="1000000">Gemini 1.5 Pro — 1,000,000 tokens</option>
+      </select>
+    </div>
+
+    <div class="label">Simulate context usage</div>
+    <div class="slider-row">
+      <label>System prompt</label>
+      <input type="range" min="0" max="2000" value="300" id="sys-tok" oninput="updateCtx()">
+      <span class="val" id="sys-val">300</span>
+    </div>
+    <div class="slider-row">
+      <label>Chat history</label>
+      <input type="range" min="0" max="10000" value="1200" id="hist-tok" oninput="updateCtx()">
+      <span class="val" id="hist-val">1,200</span>
+    </div>
+    <div class="slider-row">
+      <label>Documents/RAG</label>
+      <input type="range" min="0" max="50000" value="5000" id="doc-tok" oninput="updateCtx()">
+      <span class="val" id="doc-val">5,000</span>
+    </div>
+
+    <div class="ctx-bar">
+      <div class="ctx-used" id="ctx-used-bar">Used</div>
+      <div class="ctx-free" id="ctx-free-bar">Free</div>
+    </div>
+    <div class="stats-row">
+      <div class="stat"><div class="num" id="ctx-used-num">6,500</div><div class="lbl">tokens used</div></div>
+      <div class="stat"><div class="num" id="ctx-free-num">121,500</div><div class="lbl">tokens free</div></div>
+      <div class="stat"><div class="num" id="ctx-pct">5%</div><div class="lbl">window used</div></div>
+    </div>
+    <div class="insight" id="ctx-insight"></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Practical code — what 1 token costs</div>
+    <div class="code">
+
+# Rough token estimator (rule of thumb: 1 token ≈ 4 chars / 0.75 words)
+
+def estimate_tokens(text: str) -> dict:
+    char_estimate = len(text) / 4
+    word_estimate = len(text.split()) / 0.75
+    return {
+        "chars": len(text),
+        "token_estimate": int((char_estimate + word_estimate) / 2),
+        "cost_gpt4o_input":  f"${int((char_estimate+word_estimate)/2) * 0.0000025:.6f}",
+    }
+
+# Real-world context budgeting
+CONTEXT_LIMIT = 128_000  # GPT-4o
+SYSTEM_PROMPT_TOKENS = 300
+RESPONSE_RESERVE = 2_000   # reserve for model output
+
+available_for_history = (
+    CONTEXT_LIMIT
+    - SYSTEM_PROMPT_TOKENS
+    - RESPONSE_RESERVE
+)  # → 125,700 tokens for conversation
+
+print(f"Max chat history tokens: {available_for_history:,}")
+</div>
+  </div>
+</div>
+
+<!-- SECTION 3: SAMPLING -->
+<div id="samp" class="section tab-content">
+  <h3>Sampling mechanics — how the model picks the next token</h3>
+  <p>After the model computes probabilities for every token in its vocabulary, it must <em>choose</em> one. Temperature, top-p, and top-k control how that choice is made. Tweak the sliders to see live effects.</p>
+
+  <div class="card">
+    <div class="label">Prompt context: "The capital of France is"</div>
+    <div style="margin-bottom:12px">
+      <div class="slider-row">
+        <label>Temperature</label>
+        <input type="range" min="0" max="20" value="10" id="temp-sl" oninput="updateSampling()">
+        <span class="val" id="temp-val">1.0</span>
+      </div>
+      <div class="slider-row">
+        <label>Top-p (nucleus)</label>
+        <input type="range" min="1" max="100" value="90" id="topp-sl" oninput="updateSampling()">
+        <span class="val" id="topp-val">0.90</span>
+      </div>
+    </div>
+
+    <div class="label">Token probabilities after temperature scaling</div>
+    <div id="prob-display"></div>
+
+    <div class="label" style="margin-top:12px">What will be sampled (top-p cutoff shown)</div>
+    <div id="nucleus-display"></div>
+
+    <div class="insight" id="samp-insight"></div>
+  </div>
+
+  <div class="card">
+    <div class="label">Generate — watch token-by-token sampling</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <select id="gen-preset">
+        <option value="factual">Factual question (temp=0.2)</option>
+        <option value="creative">Creative writing (temp=1.2)</option>
+        <option value="code">Code generation (temp=0.1)</option>
+        <option value="chat">Casual chat (temp=0.8)</option>
+      </select>
+      <button onclick="runGeneration()" style="padding:6px 14px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:transparent;cursor:pointer;font-size:13px;color:var(--color-text-primary)">Generate ↗</button>
+    </div>
+    <div class="gen-output" id="gen-output">Press "Generate" to see token sampling in action.</div>
+  </div>
+
+  <div class="card">
+    <div class="label">The code behind sampling</div>
+    <div class="code">
+import numpy as np
+
+def sample_next_token(logits, temperature=1.0, top_p=0.9, top_k=50):
+    """Core sampling logic used by every LLM inference engine."""
+
+    # 1. Apply temperature — sharpens or flattens the distribution
+    logits = logits / temperature          # temp→0: argmax; temp→∞: uniform
+
+    # 2. Convert to probabilities
+    probs = np.exp(logits - logits.max())  # numerically stable softmax
+    probs = probs / probs.sum()
+
+    # 3. Top-k filtering — zero out everything outside top k
+    if top_k > 0:
+        top_k_indices = np.argsort(probs)[-top_k:]
+        mask = np.zeros_like(probs, dtype=bool)
+        mask[top_k_indices] = True
+        probs[~mask] = 0
+        probs /= probs.sum()
+
+    # 4. Top-p (nucleus) filtering — keep tokens covering p of mass
+    sorted_probs = np.sort(probs)[::-1]
+    cumulative = np.cumsum(sorted_probs)
+    cutoff = sorted_probs[np.searchsorted(cumulative, top_p)]
+    probs[probs < cutoff] = 0
+    probs /= probs.sum()
+
+    # 5. Sample!
+    return np.random.choice(len(probs), p=probs)
+
+# Temperature cheat sheet:
+# 0.0–0.3  →  deterministic, factual, code
+# 0.5–0.8  →  balanced, conversational
+# 1.0–1.5  →  creative, diverse
+# >1.5     →  chaotic, often incoherent</div>
+  </div>
+</div>
+
+<script>
+const COLORS = [
+  ['#E6F1FB','#185FA5'],['#EAF3DE','#3B6D11'],['#FAEEDA','#854F0B'],
+  ['#FBEAF0','#993556'],['#E1F5EE','#0F6E56'],['#EEEDFE','#534AB7'],
+  ['#FAECE7','#993C1D'],['#FCEBEB','#A32D2D']
+];
+
+function show(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// --- TOKENIZATION ---
+function roughTokenize(text) {
+  // Simplified BPE-like tokenizer simulation
+  const tokens = [];
+  let i = 0;
+  const common = ['ing','tion','the','and','ing','ion','ed','er','est','ly','un','re','pre','ful','ness','less','ment'];
+  
+  while (i < text.length) {
+    const ch = text[i];
+    // Numbers: each digit or short run
+    if (/\d/.test(ch)) {
+      let num = '';
+      while (i < text.length && /\d/.test(text[i])) { num += text[i]; i++; }
+      // numbers often split into 1-3 digit chunks
+      for (let n = 0; n < num.length;) {
+        const chunk = num.slice(n, n + (Math.random() > 0.5 ? 3 : 2));
+        tokens.push(chunk); n += chunk.length;
+      }
+      continue;
+    }
+    // Spaces + word
+    if (ch === ' ' || ch === '\n') {
+      let word = '';
+      while (i < text.length && /\S/.test(text[i])) { word += text[i]; i++; }
+      const ws = (ch === '\n') ? '↵' : '·';
+      if (word.length === 0) { tokens.push(ws); i++; continue; }
+      // Try to split word into sub-tokens
+      const full = ws + word;
+      if (word.length <= 4 || /[A-Z][A-Z]/.test(word)) {
+        tokens.push(full);
+      } else {
+        // find common suffix
+        let found = false;
+        for (const sfx of common) {
+          if (word.toLowerCase().endsWith(sfx) && word.length - sfx.length > 2) {
+            tokens.push(ws + word.slice(0, word.length - sfx.length));
+            tokens.push(sfx);
+            found = true; break;
+          }
+        }
+        if (!found) tokens.push(full);
+      }
+      continue;
+    }
+    // Punctuation
+    if (/[!?,.:;'"()\-]/.test(ch)) { tokens.push(ch); i++; continue; }
+    // Start of word (no leading space)
+    let word = '';
+    while (i < text.length && /[a-zA-Z]/.test(text[i])) { word += text[i]; i++; }
+    if (word) { tokens.push(word); continue; }
+    tokens.push(ch); i++;
+  }
+  return tokens;
+}
+
+function tokenize() {
+  const text = document.getElementById('tok-input').value;
+  const tokens = roughTokenize(text);
+  const display = document.getElementById('tok-display');
+  const stats = document.getElementById('tok-stats');
+  const code = document.getElementById('tok-code');
+  const insight = document.getElementById('tok-insight');
+
+  display.innerHTML = tokens.map((t, i) => {
+    const c = COLORS[i % COLORS.length];
+    return `<span class="tok" style="background:${c[0]};color:${c[1]};border-color:${c[1]}33">${t.replace(/·/g,'<span style="opacity:.4">·</span>').replace(/↵/g,'<span style="opacity:.4">↵</span>')}</span>`;
+  }).join('');
+
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const chars = text.length;
+  const ratio = words > 0 ? (tokens.length / words).toFixed(1) : '—';
+
+  stats.innerHTML = `
+    <div class="stat"><div class="num">${tokens.length}</div><div class="lbl">tokens</div></div>
+    <div class="stat"><div class="num">${words}</div><div class="lbl">words</div></div>
+    <div class="stat"><div class="num">${ratio}×</div><div class="lbl">tokens/word</div></div>`;
+
+  code.textContent = `# Tokenizer output (simplified BPE simulation)
+text = "${text.slice(0,50)}${text.length>50?'...':''}"
+
+tokens = ${JSON.stringify(tokens)}
+# Token IDs would be integers → [4321, 995, 11, ...]
+# Token count: ${tokens.length} (≈ ${Math.round(chars/4)} by char heuristic)`;
+
+  let msg = '';
+  if (tokens.length > words * 1.5) msg = `Numbers and rare words are expensive — "${text.match(/\d+/)?.[0] || 'special chars'}" may cost multiple tokens each.`;
+  else if (tokens.length < words * 1.1) msg = `Common English words often map 1:1 to tokens. Your text is token-efficient.`;
+  else msg = `Mixed content. Code and capitalized words tend to be split more than plain prose.`;
+  insight.textContent = '💡 ' + msg;
+}
+
+function setExample(ex) {
+  document.getElementById('tok-input').value = ex;
+  tokenize();
+}
+
+// --- CONTEXT WINDOW ---
+function updateCtx() {
+  const limit = parseInt(document.getElementById('model-select').value);
+  const sys = parseInt(document.getElementById('sys-tok').value);
+  const hist = parseInt(document.getElementById('hist-tok').value);
+  const doc = parseInt(document.getElementById('doc-tok').value);
+  
+  document.getElementById('sys-val').textContent = sys.toLocaleString();
+  document.getElementById('hist-val').textContent = hist.toLocaleString();
+  document.getElementById('doc-val').textContent = doc.toLocaleString();
+
+  const used = sys + hist + doc;
+  const free = Math.max(0, limit - used);
+  const pct = Math.min(100, Math.round(used / limit * 100));
+  const over = used > limit;
+
+  document.getElementById('ctx-used-num').textContent = used.toLocaleString();
+  document.getElementById('ctx-free-num').textContent = free.toLocaleString();
+  document.getElementById('ctx-pct').textContent = pct + '%';
+
+  const usedBar = document.getElementById('ctx-used-bar');
+  const freeBar = document.getElementById('ctx-free-bar');
+  usedBar.style.width = Math.min(pct, 100) + '%';
+  usedBar.style.background = over ? '#A32D2D' : pct > 80 ? '#BA7517' : '#3B6D11';
+  usedBar.style.color = 'white';
+  freeBar.style.display = over ? 'none' : 'flex';
+
+  let msg = '';
+  if (over) msg = `⚠️ Context overflow by ${(used-limit).toLocaleString()} tokens! The model will truncate your oldest messages — you lose conversation history.`;
+  else if (pct > 80) msg = `⚠️ High context usage. At >80% the model may become less coherent and responses slow down significantly.`;
+  else if (pct < 10) msg = `✓ Plenty of context free. You could add ${free.toLocaleString()} more tokens of documents, examples, or history.`;
+  else msg = `✓ Healthy context usage. ${free.toLocaleString()} tokens remain for additional few-shot examples or longer outputs.`;
+  document.getElementById('ctx-insight').textContent = msg;
+}
+
+// --- SAMPLING ---
+const baseLogits = { 'Paris': 3.8, 'Lyon': 0.8, 'France': 0.5, 'beautiful': -0.5, 'Europe': 0.2, 'unknown': -2.0, '???': -3.0 };
+
+function softmax(obj, temp) {
+  const keys = Object.keys(obj);
+  const scaled = keys.map(k => obj[k] / temp);
+  const maxVal = Math.max(...scaled);
+  const exps = scaled.map(v => Math.exp(v - maxVal));
+  const sum = exps.reduce((a,b) => a+b, 0);
+  const result = {};
+  keys.forEach((k, i) => result[k] = exps[i] / sum);
+  return result;
+}
+
+function updateSampling() {
+  const temp = parseInt(document.getElementById('temp-sl').value) / 10;
+  const topp = parseInt(document.getElementById('topp-sl').value) / 100;
+  document.getElementById('temp-val').textContent = temp.toFixed(1);
+  document.getElementById('topp-val').textContent = topp.toFixed(2);
+
+  const probs = softmax(baseLogits, temp);
+  const sorted = Object.entries(probs).sort((a,b) => b[1]-a[1]);
+
+  // Render probability bars
+  const barColors = ['#185FA5','#3B6D11','#854F0B','#993556','#0F6E56','#534AB7','#993C1D'];
+  document.getElementById('prob-display').innerHTML = sorted.map(([w,p], i) => `
+    <div class="prob-bar">
+      <span class="word">${w}</span>
+      <div class="bar-bg"><div class="bar-fill" style="width:${Math.round(p*100)}%;background:${barColors[i%barColors.length]}"></div></div>
+      <span class="pct">${(p*100).toFixed(1)}%</span>
+    </div>`).join('');
+
+  // Nucleus (top-p) display
+  let cumulative = 0;
+  const nucleus = [];
+  for (const [w, p] of sorted) {
+    nucleus.push({ w, p, inNucleus: cumulative < topp });
+    cumulative += p;
+    if (cumulative >= topp && nucleus[nucleus.length-1].inNucleus) break;
+  }
+  
+  document.getElementById('nucleus-display').innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:4px;padding:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">` +
+    sorted.map(([w,p]) => {
+      const cum = nucleus.find(n=>n.w===w);
+      const inN = cum && cum.inNucleus;
+      return `<span style="padding:4px 10px;border-radius:4px;font-size:13px;background:${inN?'#E6F1FB':'var(--color-background-primary)'};color:${inN?'#185FA5':'var(--color-text-tertiary)'};border:0.5px solid ${inN?'#185FA533':'var(--color-border-tertiary)'}">${w} <span style="font-size:11px;opacity:.7">${(p*100).toFixed(1)}%</span></span>`;
+    }).join('') + '</div>';
+
+  let msg = '';
+  if (temp < 0.3) msg = `Temperature ${temp.toFixed(1)}: Nearly deterministic. "Paris" wins almost every time. Use for factual Q&A.`;
+  else if (temp > 1.3) msg = `Temperature ${temp.toFixed(1)}: High entropy. The model might pick unusual tokens. Use for brainstorming, not facts.`;
+  else msg = `Temperature ${temp.toFixed(1)}: Balanced. Top-p=${topp.toFixed(2)} narrows sampling to ${nucleus.filter(n=>n.inNucleus).length} token(s) covering ${Math.round(topp*100)}% of probability mass.`;
+  document.getElementById('samp-insight').textContent = '💡 ' + msg;
+}
+
+// --- GENERATION SIMULATION ---
+const genPresets = {
+  factual: { temp: 0.2, tokens: ['The','answer','is','42','.','The','capital','is','Paris','.'], label: 'Factual (temp=0.2) — deterministic, confident' },
+  creative: { temp: 1.2, tokens: ['Suddenly',',','the','neon','sky','shattered','into','kaleidoscope','fragments','.'], label: 'Creative (temp=1.2) — vivid, surprising' },
+  code: { temp: 0.1, tokens: ['def','fibonacci','(n):','\\n','  ','if','n','<=','1:','return','n'], label: 'Code (temp=0.1) — precise, syntactically correct' },
+  chat: { temp: 0.8, tokens: ['Sure','!','That\'s','a','great','question','.','Let','me','explain','...'], label: 'Chat (temp=0.8) — natural, slightly varied' }
+};
+
+let genInterval = null;
+function runGeneration() {
+  if (genInterval) { clearInterval(genInterval); }
+  const preset = genPresets[document.getElementById('gen-preset').value];
+  const out = document.getElementById('gen-output');
+  out.innerHTML = `<span style="font-size:11px;color:var(--color-text-tertiary)">${preset.label}</span><br><br>`;
+  
+  let i = 0;
+  genInterval = setInterval(() => {
+    if (i >= preset.tokens.length) { clearInterval(genInterval); return; }
+    const tok = preset.tokens[i];
+    out.innerHTML += `<span class="chosen" style="opacity:0;transition:opacity .2s" id="gt${i}">${tok} </span>`;
+    setTimeout(() => { const el = document.getElementById('gt'+i); if(el) el.style.opacity='1'; }, 50);
+    i++;
+  }, 280);
+}
+
+// Init
+tokenize();
+updateCtx();
+updateSampling();
+</script>
