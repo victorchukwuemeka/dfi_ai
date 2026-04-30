@@ -535,6 +535,123 @@ for i, word1 in enumerate(words):
             print(f"{word1} vs {word2}: {similarities[i][j]:.3f}")
 ```
 
+### Attention
+```python 
+import torch
+from transformers import AutoTokenizer, AutoModel
+import numpy as np
+import matplotlib.pyplot as plt
+
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+model = AutoModel.from_pretrained("bert-base-uncased")
+
+sentence = "The cat sat on the mat because it was tired"
+inputs = tokenizer(sentence, return_tensors="pt")
+tokens = tokenizer.convert_ids_to_tokens(inputs["input_ids"][0])
+
+# output_attentions=True gives us the attention weights
+with torch.no_grad():
+    outputs = model(**inputs, output_attentions=True)
+
+# attentions: tuple of (num_layers,) each shape [batch, heads, seq, seq]
+attentions = outputs.attentions
+print(f"Layers: {len(attentions)}")
+print(f"Shape per layer: {attentions[0].shape}")  # [1, 12, seq_len, seq_len]
+
+# Visualise Layer 0, Head 0
+layer, head = 0, 0
+attn_matrix = attentions[layer][0, head].numpy()  # [seq_len, seq_len]
+
+plt.figure(figsize=(10, 8))
+plt.imshow(attn_matrix, cmap="Blues")
+plt.xticks(range(len(tokens)), tokens, rotation=45, ha="right")
+plt.yticks(range(len(tokens)), tokens)
+plt.colorbar(label="Attention weight")
+plt.title(f"Attention heatmap — Layer {layer}, Head {head}")
+plt.tight_layout()
+plt.savefig("attention_heatmap.png", dpi=150)
+plt.show()
+
+# Average attention across all heads in layer 0
+avg_attn = attentions[layer][0].mean(dim=0).numpy()
+print("\nAverage attention from [CLS] to each token (layer 0):")
+for tok, score in zip(tokens, avg_attn[0]):
+    print(f"  {tok:15s} → {score:.4f}")
+
+# Which tokens does "it" attend to most?
+it_idx = tokens.index("it")
+it_attn = attn_matrix[it_idx]
+print(f"\nToken 'it' attends most to:")
+top_k = np.argsort(it_attn)[::-1][:3]
+for idx in top_k:
+    print(f"  {tokens[idx]:15s}: {it_attn[idx]:.4f}")
+```
+
+
+
+
+
+
+### Decoding 
+```python
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+tokenizer = AutoTokenizer.from_pretrained("gpt2")
+model = AutoModelForCausalLM.from_pretrained("gpt2")
+
+prompt = "The future of artificial intelligence is"
+inputs = tokenizer(prompt, return_tensors="pt")
+
+print("=" * 60)
+print(f"Prompt: {prompt}\n")
+
+# 1. GREEDY decoding — always picks the highest probability token
+greedy_out = model.generate(**inputs, max_new_tokens=30, do_sample=False)
+print("Greedy decoding:")
+print(tokenizer.decode(greedy_out[0], skip_special_tokens=True))
+
+# 2. BEAM SEARCH — explores multiple token paths simultaneously
+beam_out = model.generate(**inputs, max_new_tokens=30, num_beams=5, early_stopping=True)
+print("\nBeam search (5 beams):")
+print(tokenizer.decode(beam_out[0], skip_special_tokens=True))
+
+# 3. TEMPERATURE SAMPLING — higher temp = more random, lower = more peaked
+for temp in [0.3, 0.7, 1.5]:
+    sample_out = model.generate(
+        **inputs, max_new_tokens=30,
+        do_sample=True, temperature=temp, top_k=0
+    )
+    print(f"\nTemperature={temp}:")
+    print(tokenizer.decode(sample_out[0], skip_special_tokens=True))
+
+# 4. TOP-K SAMPLING — only sample from top K tokens
+topk_out = model.generate(**inputs, max_new_tokens=30, do_sample=True, top_k=50)
+print("\nTop-k (k=50):")
+print(tokenizer.decode(topk_out[0], skip_special_tokens=True))
+
+# 5. TOP-P (nucleus) SAMPLING — sample from smallest vocab subset summing to p
+topp_out = model.generate(**inputs, max_new_tokens=30, do_sample=True, top_p=0.92, top_k=0)
+print("\nTop-p (p=0.92):")
+print(tokenizer.decode(topp_out[0], skip_special_tokens=True))
+
+# --- Manual logit inspection (what greedy actually does under the hood) ---
+print("\n" + "=" * 60)
+print("Manual next-token prediction (greedy logic):")
+with torch.no_grad():
+    logits = model(**inputs).logits          # [batch, seq_len, vocab_size]
+next_token_logits = logits[0, -1, :]        # logits for the very next token
+probs = torch.softmax(next_token_logits, dim=-1)
+top5 = torch.topk(probs, 5)
+
+print(f"Top 5 next tokens after '{prompt}':")
+for prob, idx in zip(top5.values, top5.indices):
+    token = tokenizer.decode([idx])
+    print(f"  '{token:15s}' → {prob.item():.4f}")
+```
+
+
+
 ---
 
 ## Summary
