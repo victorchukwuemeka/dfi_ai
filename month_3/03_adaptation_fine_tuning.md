@@ -230,7 +230,20 @@ A dataset with 500 carefully curated, diverse, correctly labeled examples will o
 
 **Step 1: Define the input-output contract**
 
-Before collecting any data, define exactly what the model should receive and produce.
+Before collecting any data, define exactly what the model should receive and produce. This is called the **input-output contract** — think of it as an API specification for your dataset.
+
+Every machine learning model learns patterns from examples. If those examples are inconsistent — same input, different outputs — the model learns nothing useful. The contract prevents this by forcing everyone (or every labeler) to agree on the format before labeling starts.
+
+**Why this matters up front:**
+- Two labelers given the same input will produce the same output structure
+- The training code can parse every example the same way (no surprises)
+- Evaluation can check outputs against the schema automatically
+- You can spot missing fields before wasting time on bad data
+
+**A good contract specifies:**
+- **Input fields**: exactly what the model receives (name, type, allowed values)
+- **Output fields**: exactly what the model should produce (structure, constraints, tone)
+- **Rules**: edge cases, fallbacks, what to do when data is missing
 
 ```python
 # Example: Customer support email response generator
@@ -307,8 +320,13 @@ Round 2: Label 100 examples → Review → Check inter-labeler agreement
 Round 3: Label remaining examples → Final review → Split train/val/test
 ```
 
+Once you have multiple labelers (or even just yourself on different days), you must measure **inter-labeler agreement** — how often do they pick the same label for the same input?
+
+**The math is simple**: count matches, divide by total. If two labelers agree 70% of the time, your guidelines aren't specific enough. The industry target is **90%+**.
+
+Low agreement means the task definition is ambiguous. Fix your guidelines, not the labelers. Run a small batch (50 examples), check agreement, revise guidelines, repeat. This iterative process is the single highest-leverage quality investment you can make.
+
 ```python
-# Inter-labeler agreement check
 def check_agreement(labeler_a: list, labeler_b: list) -> float:
     """Calculate simple agreement rate between two labelers."""
     matches = sum(1 for a, b in zip(labeler_a, labeler_b) if a == b)
@@ -336,6 +354,17 @@ print(f"Agreement rate: {agreement:.0%}")  # 80% — target is 90%+
 
 **Data versioning — treat your data like code:**
 
+A dataset is a living artifact. You'll fix incorrect labels, add new examples, remove duplicates, reformat fields. Without versioning, you'll lose track of what changed and why.
+
+A **dataset card** solves this. It's a metadata header embedded with every dataset version that records:
+
+- **Identity**: version number, creation date, what changed since last version
+- **Provenance**: who labeled it, which guidelines they followed, where the raw data came from
+- **Statistics**: how many examples in train/val/test, class balance, average length
+- **Integrity**: checksums (hashes) of every split file — if a file changes, its hash changes, and you know it's been tampered with
+
+Treat your dataset card like a `package.json` or `requirements.txt` — it's the first thing someone checks to understand what they're working with.
+
 ```python
 # Dataset card — metadata for every dataset version
 dataset_card = {
@@ -358,6 +387,19 @@ dataset_card = {
 ```
 
 **Dataset format — JSONL is standard:**
+
+JSONL (JSON Lines) is the standard interchange format for fine-tuning datasets. Every major training framework (Hugging Face, OpenAI, Axolotl, Unsloth) supports it.
+
+**Why JSONL and not CSV or plain JSON?**
+
+- **Streamable**: Each line is a self-contained record. You can process a million examples by reading one line at a time — no need to load the entire dataset into RAM.
+- **Schema-flexible**: Different examples can have different fields. A CSV requires every row to have the same columns; JSONL lets each example have its own structure.
+- **Version-control friendly**: Each line is one example, so diffs between dataset versions show exactly which examples changed. With a giant JSON array, a single change shifts every line after it.
+- **Universal**: Every language has a JSON parser. No special tooling needed.
+
+**Standard format for instruction tuning:**
+
+Each line has an `"input"` field (what the model receives) and an `"output"` field (what it should produce). Some frameworks use `"instruction"` and `"response"` instead — check the specific trainer's expected schema.
 
 ```jsonl
 {"input": {"text": "What is the refund policy for late deliveries?"}, "output": "Our refund policy states that if your order arrives more than 5 business days late, you are eligible for a full refund. Please contact support with your order number to initiate the process."}
@@ -406,6 +448,20 @@ A dataset card plus JSONL files for train/val/test splits.
 ## Core Concepts
 
 ### 1. What is Parameter-Efficient Fine-Tuning (PEFT)?
+
+**The core problem:**
+
+Every time you want to adapt a model to a new task, you have two options:
+1. **Full fine-tuning**: Update all 7B+ parameters. This works but is brutally expensive — you need multiple GPUs, days of training, and you end up with a 30GB model file for every variant.
+2. **Don't tune at all**: Just use prompts. This is cheap but limited — the model can't learn new patterns it doesn't already know.
+
+PEFT offers a third path: **update almost nothing, get most of the benefit**.
+
+**The key insight:**
+
+A model's weights are highly redundant. A 4096×4096 weight matrix doesn't have 16.8M independent degrees of freedom — it lives on a much lower-dimensional manifold. LoRA exploits this by learning a tiny set of parameters that sit in *addition* to the frozen weights, steering the output without altering what the model already knows.
+
+**Analogy:** Think of the base model as a highly skilled musician who already knows how to play any instrument. Full fine-tuning is like retraining them from scratch for a new genre. PEFT is like giving them a small set of sheet music (the adapter) — the musician's core skills stay intact, but the output changes to match the new piece.
 
 Full fine-tuning updates all model weights — billions of parameters. It requires massive compute, multiple GPUs, days of training, and produces a full copy of the model for each variant. PEFT methods update only a small fraction of parameters while keeping the rest frozen.
 
@@ -465,6 +521,19 @@ Total for LoRA r=8:      ~33M parameters (0.47% of full)
 
 ### 2. LoRA Configuration and Hyperparameters
 
+**Understanding the knobs you can turn:**
+
+LoRA gives you several configuration options that control the tradeoff between adaptation strength, compute cost, and overfitting risk. These are not arbitrary — each one maps to a specific aspect of how the adapter works:
+
+- **Rank (r)**: How many dimensions the adapter has. Higher r = more expressive = can learn more complex patterns but also more likely to overfit. Think of rank as the "width" of the bottleneck between A and B.
+- **Alpha (α)**: How strongly the adapter's output scales before being added to the base model's output. Higher alpha = stronger adaptation effect.
+- **Target modules**: Which specific weight matrices in the transformer get adapters. Attention layers (Q, K, V, O) are the most impactful; feed-forward layers matter less for most tasks.
+- **Dropout**: Randomly drops adapter neurons during training to prevent co-adaptation. Higher dropout = more regularization = less overfitting.
+
+**The alpha/r ratio matters more than either value alone:**
+
+The formula `output = base + (α/r) × adapter_output` means α and r are coupled. If you double both, the ratio stays the same and the effective adaptation strength is unchanged. A ratio around 2 (e.g. α=16, r=8) is a safe starting point for most tasks.
+
 **Key LoRA hyperparameters:**
 
 | Hyperparameter | What it controls | Typical values | Effect |
@@ -486,7 +555,23 @@ The `alpha/r` ratio controls the update strength. A common starting point:
 - `alpha = 32`, `r = 16` → ratio = 2.0
 - `alpha = 16`, `r = 16` → ratio = 1.0
 
-**Where to apply LoRA:**
+If your tuned model isn't changing enough (underfitting), try increasing α or decreasing r (raising the ratio). If it's changing too much or overfitting, decrease α or increase r (lowering the ratio).
+
+**Where to apply LoRA — which layers matter most:**
+
+A transformer layer has two main sub-components: **self-attention** (where tokens communicate with each other) and **feed-forward** (where each token processes information independently). Within self-attention, there are four weight matrices:
+
+- **W_q (Query)**: Decides "what am I looking for?" — projects each token into a query vector
+- **W_k (Key)**: Decides "what do I contain?" — projects each token into a key vector
+- **W_v (Value)**: Decides "what information do I carry?" — projects each token into a value vector
+- **W_o (Output)**: Combines the attention results back into the original dimension
+
+**Starting with q_proj and v_proj** is the standard recommendation because:
+- Q and V have the most influence over attention patterns (what the model pays attention to)
+- K changes are riskier (can break the attention distribution)
+- O and feed-forward changes add capacity but increase overfitting risk
+
+The pseudo-code diagram below shows where each matrix sits in the transformer layer:
 
 ```
 ┌─────────────────────────────────────────┐
@@ -550,7 +635,48 @@ Best practice: Start with q_proj + v_proj. If results are poor, add k_proj, o_pr
             └─────────────────┘ └─────────────────┘
 ```
 
-**Complete LoRA training script:**
+**Complete LoRA training script — step-by-step walkthrough:**
+
+Before reading the code, understand the overall flow:
+
+```
+Load pre-trained model (frozen)
+           │
+   Apply LoRA adapters (trainable)
+           │
+   Format data as instruction text
+           │
+   Tokenize text → number sequences
+           │
+   Training loop:
+     ├─ Forward pass: tokens → predictions
+     ├─ Compute loss: predictions vs targets
+     ├─ Backprop: gradients flow ONLY through LoRA adapters
+     └─ Optimizer step: update LoRA weights
+           │
+   Save LoRA adapter (tiny file, ~MB)
+```
+
+The script below does exactly this. Here's what each section does:
+
+1. **Load model & tokenizer** — We use Phi-2 (2.7B params), a small model that fits on most GPUs. The tokenizer converts text to token IDs (integers). We set `pad_token = eos_token` because many models don't have a native pad token, and batching requires uniform sequence lengths. `device_map="auto"` tells Transformers to spread the model across available GPUs/CPU automatically.
+
+2. **Apply LoRA** — We create a `LoraConfig` describing which layers to adapt (`q_proj`, `v_proj` — the query and value weight matrices in attention). The base model's weights stay frozen. `get_peft_model` wraps the base model with the LoRA adapters — only ~0.3% of parameters are now trainable. The print confirms: out of 2.8B total parameters, only 8.4M will be updated.
+
+3. **Prepare dataset** — Raw examples (input/output pairs) are formatted into a single text string: `"Instruction: {input}\nResponse: {output}"`. This matches how the model was pre-trained (predicting the next token). The Hugging Face `Dataset` is then tokenized: each text is truncated/padded to 512 tokens, producing `input_ids` (the token sequence) and `labels` (same as input_ids for language modeling — the model predicts each next token).
+
+4. **Training arguments** — Configuration for the Hugging Face `Trainer`:
+   - `per_device_train_batch_size=4`: 4 examples per GPU per step
+   - `gradient_accumulation_steps=4`: accumulate gradients over 4 steps before updating → effective batch size = 4 × 4 = 16
+   - `num_train_epochs=3`: 3 full passes over the dataset
+   - `learning_rate=2e-4`: LoRA needs higher LR than full fine-tuning (typical range: 1e-4 to 3e-4)
+   - `fp16=True`: mixed precision training — faster and uses less VRAM
+   - `save_strategy="epoch"`: save a checkpoint after each epoch
+   - `report_to="none"`: no experiment tracking (WandB/TensorBoard)
+
+5. **Train** — The Trainer handles everything: batching, forward pass, loss computation, backpropagation, optimizer step, logging, checkpointing. Because the base model is frozen, only the LoRA adapter parameters receive gradients.
+
+6. **Save** — Only the LoRA adapter weights and the tokenizer are saved. The file is a few MB — trivial to share, version, or deploy alongside the base model.
 
 ```python
 import torch
@@ -647,6 +773,20 @@ print("Training complete! Adapter saved to ./lora-adapters/final")
 
 ### 4. Loading and Using a LoRA Adapter
 
+After training, you have **two separate artifacts**:
+
+1. **The base model** — unchanged, frozen, several GB. You keep one copy.
+2. **The LoRA adapter** — tiny file (~MB) containing just the trained ΔW = A × B weights.
+
+This separation is the key advantage of LoRA. You can:
+
+- **Train multiple adapters** for different tasks, each just a few MB
+- **Swap adapters at inference time** without reloading the base model
+- **Share adapters** — upload a 5MB file instead of a 30GB model
+- **Roll back** by simply loading a different adapter or none at all
+
+Loading works in two steps: load the base model as usual, then attach the adapter on top with `PeftModel.from_pretrained`. The adapter weights are added to the base model's forward pass automatically — no manual merging needed.
+
 ```python
 from peft import PeftModel
 
@@ -671,7 +811,27 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 The biggest risk in fine-tuning is **regression** — the model gets better at the target task but worse at everything else. You must test for this.
 
-**Evaluation framework:**
+**Why separate evaluation is necessary:**
+
+When you train a model, the loss function only measures performance on your training data. It has no idea whether the model still knows basic facts, follows safety rules, or formats output correctly. A model can score 95% on your custom dataset while dropping from 85% to 60% on general knowledge — and you'd never know unless you test for it.
+
+**What you need to measure:**
+
+| Test | Purpose | What to look for |
+|------|---------|-----------------|
+| Target task (held-out) | Did we improve? | Tuned > Base by meaningful margin |
+| General QA | Did we lose knowledge? | Tuned ≈ Base (within 5%) |
+| Safety/refusal | Did we break guardrails? | Tuned ≈ Base on refusal rate |
+| Format compliance | Did output structure change? | Tuned matches expected schema |
+| Output length | Did verbosity shift? | Similar token count |
+
+A drop of more than 5% on any general capability is a red flag. You may need to reduce LoRA rank, increase dropout, or mix general-domain data into your training set.
+
+**The evaluation framework below:**
+
+The `TuningEvaluator` class wraps both the base and tuned models. It runs the same inputs through both, computes a score (accuracy, F1, ROUGE, etc.), and reports the difference (Δ). Positive Δ = improvement. Negative Δ = regression.
+
+The `regression_check` method specifically tests multiple general-purpose eval sets and flags any where the tuned model scores >5% worse than the base. This catches regression automatically so you don't have to remember to check each metric manually.
 
 ```python
 from sklearn.metrics import accuracy_score, f1_score
@@ -730,6 +890,28 @@ Full fine-tune 7B:    56-112GB VRAM (2-4 A100s)
 LoRA 7B:              14-28GB VRAM (1 A100 or 2 RTX 3090s)
 QLoRA 7B (4-bit):     4-8GB VRAM (1 RTX 3090 or even RTX 4080)
 ```
+
+**How QLoRA works under the hood:**
+
+QLoRA compresses the base model weights from 16-bit floats to 4-bit integers using a technique called **NF4 (Normal Float 4)**. Unlike naive 4-bit quantization that uniformly distributes values, NF4 adjusts the quantization levels to match the bell-curve distribution of neural network weights — most weights cluster near zero, so more precision is allocated there.
+
+**Double quantization** (the `bnb_4bit_use_double_quant=True` flag) then quantizes the quantization constants themselves, saving another ~0.5GB. The result is near-lossless compression for training purposes — models fine-tuned with QLoRA match FP16 LoRA quality within <1%.
+
+**What changes vs regular LoRA:**
+
+- **Loading**: You pass a `BitsAndBytesConfig` to `from_pretrained` instead of just `torch_dtype`. The model loads in 4-bit automatically.
+- **Storage**: Base weights stay 4-bit throughout training. They're dequantized to FP16 on-the-fly during the forward pass, then quantized back — this is the ~10% speed penalty.
+- **Training**: Everything else is identical — same `LoraConfig`, same `Trainer`, same saving/loading of adapters. The LoRA adapters themselves are still trained in full FP16 precision.
+
+**Memory breakdown for a 7B model:**
+
+| Component | LoRA (FP16) | QLoRA (4-bit) |
+|-----------|-------------|---------------|
+| Base model weights | 28 GB | ~3.5 GB |
+| LoRA adapters | ~50 MB | ~50 MB |
+| Optimizer states (Adam) | ~2× adapter size | ~2× adapter size |
+| Activations + gradients | varies by batch size | varies by batch size |
+| **Typical total** | **28-32 GB** | **4-8 GB** |
 
 ```python
 from transformers import BitsAndBytesConfig
