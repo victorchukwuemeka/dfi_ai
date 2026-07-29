@@ -125,6 +125,8 @@ By the end of the course, you can:
 
 ## Month 5 — Evaluation, Safety, and Governance
 
+Full module: `month_5/05_evaluation_safety_governance.md`
+
 ### Module 5.1: Offline Evaluation
 - Goal: Measure quality before shipping
 - Core topics: rubrics, LLM‑as‑judge, error buckets
@@ -149,6 +151,8 @@ By the end of the course, you can:
 ---
 
 ## Month 6 — Deployment and Capstone
+
+Full module: `month_6/06_deployment_capstone.md`
 
 ### Module 6.1: Performance and Cost
 - Goal: Keep latency and spend under control
