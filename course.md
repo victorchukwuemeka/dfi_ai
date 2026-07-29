@@ -169,14 +169,17 @@ By the end of the course, you can:
 - Assignment: UX findings report
 
 ### Capstone
-- Build an end‑to‑end GenAI product with metrics and demo
+- Train a GPT-style language model from scratch (tokenizer → transformer → training → evaluation → serving)
 
 ---
 
-## Capstone Suggestions
-- Enterprise search assistant with citations
-- Analyst copilot with tool actions and audit logs
-- Multimodal document intelligence system
+## Capstone
+See `capstone.md` for the full spec — build a small GPT (10–50M params) end-to-end:
+- BPE tokenizer trained on a domain corpus
+- Decoder-only transformer with RoPE, GQA, RMSNorm, SwiGLU
+- Full training loop with mixed precision, cosine schedule, gradient clipping
+- Evaluated against fine-tuned LLMs and commercial APIs on quality/latency/cost
+- Deployed via FastAPI + Gradio + Docker
 
 ## Grading
 - Monthly mini‑projects: 50%
