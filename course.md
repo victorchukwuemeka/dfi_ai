@@ -173,17 +173,17 @@ Full module: `month_6/06_deployment_capstone.md`
 - Assignment: UX findings report
 
 ### Capstone
-- Train a GPT-style language model from scratch (tokenizer → transformer → training → evaluation → serving)
+- Build a production-grade GenAI product: prompting system, RAG/tools/agents, LoRA fine-tuning, evaluation, and serving
 
 ---
 
 ## Capstone
-See `capstone.md` for the full spec — build a small GPT (10–50M params) end-to-end:
-- BPE tokenizer trained on a domain corpus
-- Decoder-only transformer with RoPE, GQA, RMSNorm, SwiGLU
-- Full training loop with mixed precision, cosine schedule, gradient clipping
-- Evaluated against fine-tuned LLMs and commercial APIs on quality/latency/cost
-- Deployed via FastAPI + Gradio + Docker
+See `capstone.md` for the full spec — build a production-grade GenAI product end-to-end:
+- Prompt system with validated schemas, guardrails, and a measured baseline
+- RAG pipeline (embeddings, retrieval, reranking, citations) and tools/agents
+- LoRA/QLoRA fine-tuning of a pretrained open-weight model on a curated domain dataset
+- Evaluated with LLM-as-judge, domain benchmarks, A/B tests, and red-teaming
+- Deployed via FastAPI + Gradio + Docker with monitoring, caching, and batching
 
 ## Grading
 - Monthly mini‑projects: 50%
