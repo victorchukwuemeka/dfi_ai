@@ -486,7 +486,7 @@ The capstone combines everything from all 6 months:
 - **Fine-tuning** (Month 3): dataset design and LoRA/QLoRA adaptation
 - **Multimodal** (Month 4, optional): vision/audio inputs
 - **Evaluation** (Month 5): LLM-as-judge, A/B testing, red-teaming
-- **Deployment** (Month 6): API server, Docker, monitoring, UX
+- **Deployment** (Month 6): API server, monitoring, UX
 
 ## 1. Rules
 
@@ -512,8 +512,7 @@ capstone/
 ├── README.md                     # ⚠ Architecture diagram, design decisions, results, cost analysis, failure log
 ├── Makefile                      # ⚠ `make all`, `make test`, `make serve`, `make reproduce`, `make lint`, `make loadtest`
 ├── requirements.txt              # Pinned, with exact versions (hashes recommended)
-├── pyproject.toml                # Project metadata + ruff, mypy, pytest config
-├── .github/workflows/ci.yml      # CI pipeline (lint -> type -> test -> docker build -> eval gate)
+├── pyproject.toml                # Project metadata + pytest config
 ├── config.py                     # All hyperparameters and settings in one place (dataclass)
 ├── data/
 │   ├── download.py               # ⚠ Reproducible data download
@@ -542,17 +541,15 @@ capstone/
 │   ├── api.py                    # ⚠ FastAPI app (see Phase 5)
 │   ├── server.py                 # Model load + batching + KV-cache pool
 │   ├── cache.py                  # Semantic cache
-│   ├── streaming.py              # SSE streaming
+│   ├── streaming.py              # Token streaming (StreamingResponse)
 │   ├── audit.py                  # Audit-trail writer
 │   ├── metrics.py                # Prometheus metrics
 │   ├── ui.py                     # ⚠ Gradio/Streamlit UI
 │   └── test_api.py               # ⚠ API tests (generate, stream, health, validation)
 ├── ops/
-│   ├── Dockerfile                # ⚠ Multi-stage, non-root, pinned base
-│   ├── docker-compose.yml        # api + ui + prometheus + grafana
 │   ├── prometheus.yml
 │   ├── grafana/dashboard.json
-│   ├── locustfile.py             # Load-test script
+│   ├── soak_test.py              # Concurrent soak script (plain Python)
 │   └── incident_playbook.md
 └── samples/                      # Generated outputs: before_improvements.txt, after_improvements.txt
 ```
@@ -650,7 +647,7 @@ A domain dataset and a LoRA fine-tune of a small open-weight model (Phi-2, Gemma
 `eval/judge.py` scores outputs 1–5 on the dimensions you define (factual accuracy, coherence, format compliance, domain usefulness). Control for the biases Month 5 teaches (position, verbosity, self-enhancement). Document the rubric.
 
 ### 7.2 Human rating
-You plus 2 independent raters score a sample with the same rubric; report inter-rater agreement (Cohen's kappa) honestly.
+You plus 2 independent raters score a sample with the same rubric; report inter-rater agreement (simple agreement rate, as taught in Month 5) honestly.
 
 ### 7.3 Domain benchmark
 20 diverse, domain-specific prompts, at least 3 "trap" prompts (valid JSON, format compliance). Fixed seed, fixed temperature. Outputs committed to `samples/`.
@@ -687,7 +684,7 @@ Required endpoints — all tested, all working on **CPU** (small open-weight mod
 | Endpoint | Behavior |
 |---|---|
 | `POST /generate` | JSON in / JSON out, validated parameters (bounds on `temperature`, `max_tokens`, `top_k`), returns output, token counts, latency, and a `request_id`. |
-| `POST /stream` | **SSE streaming** of tokens as produced, reusing the prompt KV cache. |
+| `POST /stream` | **Token streaming** of tokens as produced (FastAPI `StreamingResponse`). |
 | `GET /health` | Model + tokenizer loaded, cache warm. Returns version and uptime. |
 | `GET /metrics` | Prometheus format (Phase 6). |
 
@@ -701,7 +698,7 @@ Required endpoints — all tested, all working on **CPU** (small open-weight mod
 
 ### 8.3 Load test (Gate G5)
 
-Write `ops/locustfile.py` and run a **30-minute soak test** with 50 concurrent users mixing `/generate` and `/stream`. Commit results showing:
+Write `ops/soak_test.py` — a plain-Python concurrent script (thread pool + `httpx`/`requests`, no extra framework) — and run a **30-minute soak test** with 50 concurrent clients mixing `/generate` and `/stream`. Commit results showing:
 
 - p50/p95/p99 time-to-first-token and time-to-last-token
 - 0 HTTP 5xx errors, 0 dropped requests
@@ -719,7 +716,7 @@ Gradio or Streamlit app that:
 
 ### Deliverables
 
-`serve/*.py`, `ops/locustfile.py`, load-test results, `ops/Dockerfile`, `ops/docker-compose.yml`.
+`serve/*.py`, `ops/soak_test.py`, soak-test results.
 
 ## 9. Phase 6 — Observability, Safety, UX (Week 4, 30 points)
 
@@ -753,12 +750,10 @@ Every interaction (input, output, params, model version, timing, rating) is writ
 
 `serve/metrics.py`, `serve/audit.py`, `ops/prometheus.yml`, `ops/grafana/dashboard.json`, `ops/incident_playbook.md`, `ux_report.md`, dashboard screenshot, rate limiting + filters in `api.py`.
 
-## 10. Phase 7 — Hardening & CI/CD (Week 4, 10 points)
+## 10. Phase 7 — Hardening & Final Docs (Week 4, 10 points)
 
-- `pyproject.toml` with **ruff** (lint), **mypy/pyright** (type), and **pytest** configs — all clean, zero warnings.
-- **CI** in `.github/workflows/ci.yml`: on every push — lint → typecheck → unit tests → docker build → **eval gate** (rerun the domain benchmark; fail CI on > 2% regression vs the committed baseline). CI must pass on your final commit.
-- **Coverage ≥ 80%** on `app`, `eval`, `serve` (measured and reported).
-- `Makefile`: `make all` runs the whole pipeline (data → finetune → eval → serve); `make reproduce` rebuilds the app and eval numbers from a fresh clone.
+- `make check`: one command that runs the full test suite plus the domain benchmark regression check (fail on > 2% regression vs the committed baseline, as in Month 3 regression testing). Must pass on your final commit.
+- `Makefile`: `make all` runs the whole pipeline (data → finetune → eval → serve); `make reproduce` rebuilds the app and eval numbers from a fresh clone; `make soak` runs the soak test.
 - `README.md` must contain: architecture diagram (ASCII or image), every design decision with reasoning, the cost/latency table, the failure log (what broke, what you learned), and clear run instructions.
 
 ## 11. The Gates (Hard Pass/Fail)
@@ -771,8 +766,8 @@ Each gate is binary. **Any red gate = capstone not passed** until it goes green.
 | G2 | Correctness | `pytest` (app, eval, serve) | All green, including prompts, RAG, agents, judge, API, cache, batching. |
 | G3 | Quality | Domain benchmark vs documented baseline | ≥ 60% LLM-judge win rate (or an equivalent, pre-approved domain metric margin). |
 | G4 | Speed | Course-standard machine | TTFT < 250 ms, ≥ 15 tok/s at batch 1 (API or documented local model). |
-| G5 | Stability | 30-min locust soak, 50 users | p95 < 2 s, 0 errors, flat memory, no dropped requests. |
-| G6 | Tests & CI | Coverage report + CI log | Coverage ≥ 80%; CI green on submitted commit. |
+| G5 | Stability | 30-min soak, 50 concurrent clients | p95 < 2 s, 0 errors, flat memory, no dropped requests. |
+| G6 | Tests | `pytest` + `make check` | All green on submitted commit. |
 | G7 | Auditability | Manual inspection | Every request logged with trace id; audit store queryable. |
 | G8 | History | `git log` | Incremental commits across ≥ 3 weeks; no one-shot repo. |
 | G9 | Defense | 45-minute oral (Section 14) | Panel passes you. |
@@ -790,7 +785,7 @@ Each item is verified in the defense. Points stack, but only if G1–G9 are all 
 - **Multi-agent orchestration** (+4): planner + worker agents with verification.
 - **In-production A/B testing** (+3): traffic split with statistical analysis.
 - **Automatic model routing** (+3): small/cheap model vs large model by prompt complexity.
-- **Custom domain eval metric** (+3): designed, validated, and regression-gated in CI.
+- **Custom domain eval metric** (+3): designed, validated, and regression-gated in `make check`.
 - **Production extras**: rate-limited auth, multi-tenant namespacing, structured error taxonomy (+2 each, max +4).
 
 Distinction requires ≥ 10 bonus points **and** Gate G3 beaten by a wider margin (≥ 75% win rate).
@@ -807,7 +802,7 @@ Distinction requires ≥ 10 bonus points **and** Gate G3 beaten by a wider margi
 | Serving | 30 | API 8, streaming + cache 8, batching 8, UI 6 |
 | Observability | 15 | Logs/metrics/tracing 8, dashboard/alerts 7 |
 | UX + HITL + audit | 20 | 5 each (UX, HITL, audit, safety) |
-| Hardening + CI + docs | 15 | Lint/type/CI green, README quality |
+| Hardening + docs | 15 | Clean code, tests green, README quality |
 | Defense | 10 | Oral performance |
 | Stretch bonus | +20 max | Section 12 |
 
@@ -849,21 +844,21 @@ You may not bring notes written by anyone else. If you cannot explain a line in 
 | 12 | LoRA training run #1 (short) | Phase 3 |
 | 13 | Fix dataset/format bugs; rerun | Phase 3 |
 | 14 | Full LoRA run + regression tests | Phase 3 |
-| 15 | Judge harness + rubric + kappa | Phase 4 |
+| 15 | Judge harness + rubric + inter-rater agreement | Phase 4 |
 | 16 | 20-prompt benchmark + trap prompts | Phase 4 |
 | 17 | A/B vs baseline + statistical analysis | Phase 4 |
 | 18 | Red-team pass + fixes; eval_report.md | Phase 4 |
 | 19 | FastAPI: `/generate`, `/health`, `/metrics` | Phase 5 |
-| 20 | SSE `/stream` + streaming tests | Phase 5 |
+| 20 | Streaming `/stream` + streaming tests | Phase 5 |
 | 21 | KV-cache reuse + semantic cache | Phase 5 |
 | 22 | Batching + backpressure (429) | Phase 5 |
 | 23 | UI (streaming, controls, rating, edit) | Phase 5 |
-| 24 | Locust load test; fix; re-run 30-min soak | G5 |
+| 24 | Soak test; fix; re-run 30-min soak | G5 |
 | 25 | Metrics + logs + tracing + Grafana + alerts | Phase 6 |
 | 26 | Audit store + query tool + rate limiting + filters | Phase 6 |
 | 27 | HITL logic + review queue + usability test | Phase 6 |
 | 28 | Fix top-2 UX issues; re-test | Phase 6 |
-| 29 | CI/CD, coverage, Makefile, README, samples | Phase 7 |
+| 29 | `make check`, Makefile, README, samples | Phase 7 |
 | 30 | `make reproduce` clean run + gate check | G1–G8 |
 | 31 | Defense prep + mock defense with a peer | Defense |
 | 32 | **Submission + defense** | G9 |
@@ -879,11 +874,11 @@ You may not bring notes written by anyone else. If you cannot explain a line in 
 ## 17. Submission Checklist
 
 - [ ] `make all` and `make reproduce` work from a fresh clone (G1)
-- [ ] `pytest` green, coverage ≥ 80% (G2, G6)
+- [ ] `pytest` green and `make check` passes (G2, G6)
 - [ ] Domain benchmark beats baseline by ≥ 60% judge win rate (or approved metric) (G3)
 - [ ] TTFT < 250 ms, ≥ 15 tok/s (G4)
 - [ ] 30-min soak: p95 < 2 s, 0 errors, flat memory (G5)
-- [ ] CI green on final commit (G6)
+- [ ] `make check` green on final commit (G6)
 - [ ] Audit store queryable; every request traced (G7)
 - [ ] Incremental git history (G8)
 - [ ] README with architecture, decisions, tables, failure log
@@ -934,4 +929,4 @@ You may not bring notes written by anyone else. If you cannot explain a line in 
 - **Monitoring**: Prometheus + Grafana, LangFuse, Weights & Biases Prompts
 - **UX research**: Nielsen Norman Group guidelines for AI interactions
 - **Reliability**: Google SRE books, incident response playbooks
-- **Deployment**: FastAPI docs, Docker best practices, GitHub Actions for CI/CD
+- **Deployment**: FastAPI docs

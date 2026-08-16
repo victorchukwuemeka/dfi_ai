@@ -13,7 +13,7 @@ A production-grade GenAI product in a domain you choose. It must:
 3. Be adapted to your domain with **LoRA/QLoRA** fine-tuning on a dataset you curate and clean.
 4. Be evaluated rigorously: an LLM-as-judge harness, a domain benchmark, an A/B comparison against a documented baseline, and a red-team pass.
 5. Be served through a FastAPI server with streaming, caching, batching, monitoring, and a web UI.
-6. Prove it works: unit tests, CI, load tests, and a live defense.
+6. Prove it works: unit tests, a soak test, and a live defense.
 
 All code in one GitHub repo with a README covering every design decision.
 
@@ -41,7 +41,7 @@ A violation of any rule is an automatic capstone failure (grade 0).
 | Adaptation | LoRA / QLoRA via `peft` | Parameter-efficient only |
 | Grounding | RAG with `sentence-transformers` + `chromadb`, rerankers, function calling | Build the pipeline yourself |
 | Evaluation | LLM-as-judge, domain metrics, A/B analysis, red-team | Judge harness is yours |
-| Serving | FastAPI + Gradio/Streamlit + Docker | SSE streaming, caching, batching, metrics |
+| Serving | FastAPI + Gradio/Streamlit | Token streaming, caching, batching, metrics |
 | Tracking | W&B or local tensorboard | Log training + eval; publish your curves |
 | Quality | LLM-as-judge win-rate + domain benchmark vs a documented baseline | Beat your baseline by a defined margin |
 
@@ -143,7 +143,7 @@ A domain dataset and a LoRA fine-tune on top of a pretrained open-weight model (
 ### The eval harness (`eval/`)
 
 1. **LLM-as-judge** (`eval/judge.py`): score outputs 1–5 on the dimensions you define (factual accuracy, coherence, format compliance, domain usefulness). Control for the biases Month 5 teaches: position, verbosity, self-enhancement. Document the rubric.
-2. **Human rating**: you plus 2 independent raters score a sample; report inter-rater agreement (Cohen's kappa) honestly.
+2. **Human rating**: you plus 2 independent raters score a sample; report inter-rater agreement (simple agreement rate, as taught in Month 5) honestly.
 3. **Domain benchmark**: 20 diverse, domain-specific prompts, at least 3 "trap" prompts (valid JSON, format compliance). Fixed seed, fixed temperature. Every output committed to `samples/`.
 4. **A/B comparison**: your final system vs your Part 1 baseline (and, if applicable, vs the untuned base model). Statistical analysis as taught in Month 5 (t-test, effect size).
 5. **Red-team**: attack your own system (prompt injection, jailbreaks, data exfiltration) and document mitigations in `eval/red_team_report.md`.
@@ -180,7 +180,7 @@ Write an honest tradeoff paragraph: where each configuration wins and when you w
 | Endpoint | Behavior |
 |---|---|
 | `POST /generate` | Validated params (bounds on temperature/max_tokens/top_k). Returns output, token counts, latency, `request_id`. |
-| `POST /stream` | SSE streaming of tokens as produced, reusing the prompt KV cache. TTFT must be visibly lower than buffered. |
+| `POST /stream` | Token streaming of tokens as produced (FastAPI `StreamingResponse`), with TTFT visibly lower than buffered. |
 | `GET /health` | Model + tokenizer loaded, cache warm. Version + uptime. |
 | `GET /metrics` | Prometheus format. |
 
@@ -205,7 +205,7 @@ def generate(req: GenerateRequest, request: Request):
 
 @app.post("/stream")
 async def stream(req: GenerateRequest):
-    # SSE generator yielding tokens; reuse prompt KV cache
+    # StreamingResponse generator yielding tokens as produced
     ...
 ```
 
@@ -217,9 +217,9 @@ async def stream(req: GenerateRequest):
 4. **Backpressure**: bounded queue; saturated => `429` + `Retry-After`, never unbounded growth.
 5. **Streaming**: prove with a measurement that streaming cuts time-to-first-token.
 
-### Load test (Gate G5)
+### Soak test (Gate G5)
 
-`ops/locustfile.py`, **30-minute soak, 50 concurrent users**, mixing `/generate` and `/stream`. Commit results:
+`ops/soak_test.py` — a plain-Python concurrent script (thread pool + `httpx`/`requests`; no extra framework). **30-minute soak, 50 concurrent clients**, mixing `/generate` and `/stream`. Commit results:
 
 - p50/p95/p99 TTFT and TTLT
 - 0 HTTP 5xx, 0 dropped requests
@@ -234,13 +234,13 @@ async def stream(req: GenerateRequest):
 - **edit-and-resubmit** (edit output, re-ask)
 - **rating** (thumbs up/down -> audit store)
 
-### Docker
+### Local run
 
-Multi-stage `ops/Dockerfile`, runs as **non-root**, pinned base image. `docker-compose.yml` for api + ui + prometheus + grafana.
+Everything runs locally from the Makefile — `make serve` starts the API and UI with plain `uvicorn`/Gradio; Prometheus/Grafana (Phase 6) also run locally. No containers required.
 
 ### Deliverable
 
-`serve/` (api.py, server.py, cache.py, streaming.py, audit.py, metrics.py, ui.py, test_api.py), `ops/locustfile.py`, load-test results, `ops/Dockerfile`, `ops/docker-compose.yml`.
+`serve/` (api.py, server.py, cache.py, streaming.py, audit.py, metrics.py, ui.py, test_api.py), `ops/soak_test.py`, soak-test results.
 
 ---
 
@@ -274,12 +274,10 @@ Every interaction (input, output, params, model version, timings, ratings) in an
 
 ---
 
-## Part 7: Hardening & CI/CD (Week 4)
+## Part 7: Hardening & Final Docs (Week 4)
 
-- `pyproject.toml`: ruff (lint), mypy/pyright (types), pytest — all clean, zero warnings
-- **CI** (`.github/workflows/ci.yml`): on every push — lint -> type -> test -> docker build -> **eval gate** (rerun your domain benchmark; fail on > 2% regression vs the committed baseline). Green on final commit.
-- **Coverage >= 80%** on app, eval, serve
-- **Makefile**: `make all`, `make test`, `make serve`, `make reproduce`, `make lint`, `make loadtest`
+- **`make check`**: one command that runs the full test suite plus the domain benchmark regression check (fail on > 2% regression vs the committed baseline, as in Month 3 regression testing)
+- **Makefile**: `make all`, `make test`, `make serve`, `make reproduce`, `make check`, `make soak`
 - **README**: architecture diagram, every design decision, cost/latency table, failure log (what broke and what you learned), run instructions
 
 ---
@@ -294,8 +292,8 @@ Each gate is binary. Any red gate = capstone not passed until green.
 | G2 | Correctness | `pytest` green: prompts, RAG, agents, judge, API, cache, batching, streaming, audit. |
 | G3 | Quality | Final system beats your documented baseline on the domain benchmark: >= 60% LLM-judge win rate (or an equivalent, pre-approved domain metric margin). |
 | G4 | Speed | TTFT < 250 ms, >= 15 tok/s at batch 1 on the course machine (API or documented local model). |
-| G5 | Stability | 30-min locust soak, 50 users: p95 < 2 s, 0 errors, flat memory. |
-| G6 | Tests & CI | Coverage >= 80%; CI green on submitted commit. |
+| G5 | Stability | 30-min soak, 50 concurrent clients: p95 < 2 s, 0 errors, flat memory. |
+| G6 | Tests | `pytest` green; `make check` passes on submitted commit. |
 | G7 | Auditability | Every request logged with trace id; audit store queryable. |
 | G8 | History | Incremental commits over >= 3 weeks. |
 | G9 | Defense | Pass the 45-minute oral defense. |
@@ -313,7 +311,7 @@ Each verified in the defense. Points stack only if G1–G9 are green.
 - Multi-agent orchestration (+4) — planner + worker agents with verification
 - In-production A/B testing (+3) — traffic split with statistical analysis
 - Automatic model routing (+3) — small/cheap model vs large model by prompt complexity
-- Custom eval metric for your domain (+3) — designed, validated, and regression-gated in CI
+- Custom eval metric for your domain (+3) — designed, validated, and regression-gated in `make check`
 - Production extras (+2 each, max +4) — auth, multi-tenancy, error taxonomy
 
 Distinction requires >= 10 bonus points and G3 beaten by a wider margin (>= 75% win rate).
@@ -332,7 +330,7 @@ Distinction requires >= 10 bonus points and G3 beaten by a wider margin (>= 75% 
 | Serving | 30 | API 8, streaming + cache 8, batching 8, UI 6 |
 | Observability | 15 | Logs/metrics/tracing 8, dashboard/alerts 7 |
 | UX + HITL + audit | 20 | 5 each (UX, HITL, audit, safety) |
-| Hardening + CI + docs | 15 | Lint/type/CI green, README quality |
+| Hardening + docs | 15 | Clean code, tests green, README quality |
 | Defense | 10 | Oral performance |
 | Stretch bonus | +20 max | Section above |
 
@@ -376,21 +374,21 @@ You may not bring notes written by anyone else. If you cannot explain a line in 
 | 12 | LoRA training run #1 (short) | Phase 3 |
 | 13 | Fix dataset/format bugs; rerun | Phase 3 |
 | 14 | Full LoRA run + regression tests | Phase 3 |
-| 15 | Judge harness + rubric + kappa | Phase 4 |
+| 15 | Judge harness + rubric + inter-rater agreement | Phase 4 |
 | 16 | 20-prompt benchmark + trap prompts | Phase 4 |
 | 17 | A/B vs baseline + statistical analysis | Phase 4 |
 | 18 | Red-team pass + fixes; eval_report.md | Phase 4 |
 | 19 | FastAPI `/generate`, `/health`, `/metrics` | Phase 5 |
-| 20 | SSE `/stream` + streaming tests | Phase 5 |
+| 20 | Streaming `/stream` + streaming tests | Phase 5 |
 | 21 | KV-cache reuse + semantic cache | Phase 5 |
 | 22 | Batching + backpressure | Phase 5 |
 | 23 | UI (streaming, controls, rating, edit) | Phase 5 |
-| 24 | Locust load test; fix; 30-min soak | G5 |
+| 24 | Soak test; fix; 30-min soak | G5 |
 | 25 | Metrics + logs + tracing + Grafana + alerts | Phase 6 |
 | 26 | Audit store + query tool + rate limiting | Phase 6 |
 | 27 | HITL + review queue + usability test | Phase 6 |
 | 28 | Fix top-2 UX issues; re-test | Phase 6 |
-| 29 | CI/CD, coverage, Makefile, README, samples | Phase 7 |
+| 29 | `make check`, Makefile, README, samples | Phase 7 |
 | 30 | `make reproduce` clean run + gate check | G1–G8 |
 | 31 | Defense prep + mock defense | Defense |
 | 32 | **Submission + defense** | G9 |
@@ -418,8 +416,8 @@ The API-model route works for everything except the LoRA phase, which needs a sm
 - Designed a prompt system with validated schemas and guardrails, and measured a baseline with LLM-as-judge
 - Built a RAG pipeline (embeddings, retrieval, reranking, citation grounding) with [Hit Rate X%, MRR Y] on a labeled set
 - Fine-tuned [Phi-2/Gemma-2B/TinyLlama] with LoRA on [dataset] — improving domain quality by [Z]% by judge score without regressing general ability
-- Evaluated with an LLM-as-judge harness (Cohen's kappa [κ]), a 20-prompt domain benchmark, and an A/B test against baseline
-- Deployed as a FastAPI server with SSE streaming, semantic caching, batching, Prometheus monitoring, and a Gradio UI in Docker — passing a 50-concurrent-user, 30-minute load test
+- Evaluated with an LLM-as-judge harness (inter-rater agreement), a 20-prompt domain benchmark, and an A/B test against baseline
+- Deployed as a FastAPI server with token streaming, semantic caching, batching, Prometheus monitoring, and a Gradio UI — passing a 50-concurrent-user, 30-minute soak test
 
 **Interview talking point:** "Here's a table comparing my baseline, my fine-tuned model, and my full system. LoRA gave me [Z]% domain improvement, RAG gave me citation-grounded answers, and caching/batching cut p95 latency by [W]%. That's the tradeoff stack I want to help your team optimize."
 
@@ -429,11 +427,11 @@ The API-model route works for everything except the LoRA phase, which needs a sm
 
 - [ ] Proposal approved (Phase 0)
 - [ ] `make all` and `make reproduce` work from a fresh clone (G1)
-- [ ] `pytest` green, coverage >= 80% (G2, G6)
+- [ ] `pytest` green and `make check` passes (G2, G6)
 - [ ] Domain benchmark beats baseline by >= 60% judge win rate (or approved metric) (G3)
 - [ ] TTFT < 250 ms, >= 15 tok/s (G4)
 - [ ] 30-min soak: p95 < 2 s, 0 errors, flat memory (G5)
-- [ ] CI green on final commit (G6)
+- [ ] `make check` green on final commit (G6)
 - [ ] Audit store queryable; every request traced (G7)
 - [ ] Incremental git history (G8)
 - [ ] README with architecture, decisions, tables, failure log
